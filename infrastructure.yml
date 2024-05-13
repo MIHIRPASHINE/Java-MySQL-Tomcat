@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: A sample template to create RDS DATABASE infrastructure for practice
+Resources:
+  RDSVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+       - Key: Name
+         Value: RDS-VPC
+
+  RDSInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: RDS-IGW
+
+  RDSAttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+         Ref: RDSVPC
+      InternetGatewayId:
+         Ref: RDSInternetGateway 
+
+  RDSPUBSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: RDSVPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: "us-east-1a"
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Name
+        Value: RDS-PUB-SUBNET 
+
+  RDSPVTSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: RDSVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: "us-east-1b"
+      Tags:
+      - Key: Name
+        Value: RDS-PVT-SUBNET        
+
+  RDSPUBRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:  
+        Ref: RDSVPC
+      Tags:
+      - Key: Name
+        Value: RDS-PUB-RT
+
+  RDSPVTRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:  
+        Ref: RDSVPC
+      Tags:
+      - Key: Name
+        Value: RDS-PVT-RT      
+
+  RDSPUBSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: RDSPUBSubnet
+      RouteTableId:
+        Ref: RDSPUBRouteTable
+
+  RDSPVTSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: RDSPVTSubnet
+      RouteTableId:
+        Ref: RDSPVTRouteTable      
+  
+  RDSRoute:
+    Type: AWS::EC2::Route
+    DependsOn: RDSAttachGateway
+    Properties:
+       RouteTableId:
+         Ref: RDSPUBRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId:
+         Ref: RDSInternetGateway
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow incoming ssh req towards server
+      VpcId: !Ref RDSVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0 
+      Tags: 
+      - Key: Name
+        Value: SSH-SEC-GRP  
+
+  MYSQLSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow MYSQL traffic to server
+        VpcId: !Ref RDSVPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            CidrIp: 0.0.0.0/0
+        SecurityGroupEgress:
+          - IpProtocol: -1
+            FromPort: -1
+            ToPort: -1
+            CidrIp: 0.0.0.0/0   
+        Tags: 
+        - Key: Name
+          Value: MY-SQL-SECGRP  
+
+  TOMCATSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow TOMCAT traffic to server
+        VpcId: !Ref RDSVPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 8080
+            ToPort: 8080
+            CidrIp: 0.0.0.0/0
+        SecurityGroupEgress:
+          - IpProtocol: -1
+            FromPort: -1
+            ToPort: -1
+            CidrIp: 0.0.0.0/0   
+        Tags: 
+        - Key: Name
+          Value: TOMCAT-SECGRP                       
+
+  RDSPUBInstance: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: "ami-0c0b74d29acd0cd97"
+      KeyName: "nvirgkeypair"
+      SubnetId: !Ref RDSPUBSubnet
+      SecurityGroupIds: 
+         - !Ref RDSSecurityGroup
+         - !Ref TOMCATSecurityGroup
+      AvailabilityZone: us-east-1a
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo yum -y install git
+          sudo git clone https://github.com/Ai-TechNov/aws-rds-java.git
+      InstanceType: t2.micro
+      Tags: 
+      - Key: Name
+        Value: APP-SERVER 
+
+  IBMPVTInstance: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: "ami-0c0b74d29acd0cd97"
+      KeyName: "nvirgkeypair"
+      SubnetId: !Ref RDSPVTSubnet
+      SecurityGroupIds: 
+         - !Ref RDSSecurityGroup
+         - !Ref MYSQLSecurityGroup
+      AvailabilityZone: us-east-1b
+      InstanceType: t2.micro
+      Tags: 
+      - Key: Name
+        Value: DATABASE-SERVER    
+
+  RDSNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref RDSPUBSubnet
+      Tags:
+      - Key: Name
+        Value: Rds-NAT-gateway
+  NATGatewayEIP:
+     Type: AWS::EC2::EIP
+     Properties:
+        Domain: RDSVPC
+  RouteNATGateway:
+     DependsOn: RDSNATGateway
+     Type: AWS::EC2::Route
+     Properties:
+        RouteTableId: !Ref RDSPVTRouteTable
+        DestinationCidrBlock: '0.0.0.0/0'
+        NatGatewayId: !Ref RDSNATGateway              
